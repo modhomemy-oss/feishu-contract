@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>采购供货合同生成器</title>
+  <!-- 引入飞书多维表格官方 SDK -->
+  <script src="https://lf-cdn.coze.cn/obj/lark-open-resources/base-sdk/1.0.0/base.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      padding: 40px;
+      color: #333;
+      background-color: #f8f9fa;
+    }
+    .contract-box {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 40px;
+      border: 1px solid #ddd;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    }
+    h1 { text-align: center; margin-bottom: 30px; letter-spacing: 2px; }
+    .meta-info { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 15px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 20px; }
+    th, td { border: 1px solid #333; padding: 10px; text-align: center; font-size: 14px; }
+    th { background-color: #f2f2f2; }
+    .total-amount { text-align: right; font-size: 16px; font-weight: bold; margin-top: 10px; }
+    .sign-area { display: flex; justify-content: space-between; margin-top: 60px; line-height: 2; }
+    .btn-print {
+      display: block; width: 100%; max-width: 800px; margin: 0 auto 20px auto;
+      padding: 12px; background: #007bff; color: #fff; text-align: center;
+      border: none; border-radius: 6px; font-size: 16px; cursor: pointer;
+    }
+    .btn-print:hover { background: #0056b3; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .contract-box { border: none; box-shadow: none; padding: 0; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <button class="btn-print no-print" onclick="window.print()">🖨️ 导出 PDF / 打印合同</button>
+
+  <div class="contract-box">
+    <h1>产品采购供货合同</h1>
+    
+    <div class="meta-info">
+      <div><strong>合同/PO编号：</strong><span id="po-no">请在多维表格中选中一条记录</span></div>
+      <div><strong>签约日期：</strong><span id="order-date">-</span></div>
+    </div>
+    <div class="meta-info">
+      <div><strong>供货方（乙方）：</strong><span id="supplier">-</span></div>
+      <div><strong>预计交期：</strong><span id="delivery-date">-</span></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>序号</th>
+          <th>SKU / 款号</th>
+          <th>结算数量</th>
+          <th>采购单价 (元)</th>
+          <th>货款小计 (元)</th>
+        </tr>
+      </thead>
+      <tbody id="sku-tbody">
+        <tr>
+          <td colspan="5">正在读取多维表格数据...</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="total-amount">
+      货款总计：¥ <span id="total-amount">0.00</span>
+    </div>
+
+    <div class="sign-area">
+      <div>
+        <strong>甲方（买方）：</strong><br>
+        授权代表签字：<br>
+        盖章日期：
+      </div>
+      <div>
+        <strong>乙方（供货方）：</strong><br>
+        授权代表签字：<br>
+        盖章日期：
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 监听多维表格中光标点击选中的记录
+    bitable.base.onSelectionChange(async (event) => {
+      const { tableId, recordId } = event.data;
+      if (!tableId || !recordId) return;
+
+      try {
+        const table = await bitable.base.getTableById(tableId);
+        const record = await table.getRecordById(recordId);
+        const fields = record.fields;
+
+        // 读取字段并填入网页（字段名与你表格保持一致）
+        document.getElementById('po-no').innerText = fields['采购单号(PO号)'] || '未填写';
+        document.getElementById('supplier').innerText = fields['涉及供应商'] || fields['涉及供应商真名'] || '未填写';
+        document.getElementById('order-date').innerText = fields['采购下单日期'] ? new Date(fields['采购下单日期']).toLocaleDateString() : '-';
+        document.getElementById('delivery-date').innerText = fields['预计工厂交期'] ? new Date(fields['预计工厂交期']).toLocaleDateString() : '-';
+        document.getElementById('total-amount').innerText = fields['整单货款总额(RMB)'] || fields['最终应付总额(RMB)'] || '0.00';
+
+        // 尝试提取 SKU 明细列表并渲染
+        const skuList = fields['包含SKU列表'] || [];
+        const qtyList = fields['各SKU实下单数'] || [];
+        const tbody = document.getElementById('sku-tbody');
+        tbody.innerHTML = '';
+
+        if (Array.isArray(skuList) && skuList.length > 0) {
+          skuList.forEach((sku, index) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${index + 1}</td>
+              <td>${sku.text || sku}</td>
+              <td>${qtyList[index] || '-'}</td>
+              <td>-</td>
+              <td>-</td>
+            `;
+            tbody.appendChild(tr);
+          });
+        } else {
+          tbody.innerHTML = '<tr><td colspan="5">该订单暂无关联明细</td></tr>';
+        }
+      } catch (err) {
+        console.error("读取数据异常:", err);
+      }
+    });
+  </script>
+</body>
+</html>
