@@ -3,8 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <title>采购供货合同生成器</title>
-  <!-- 使用官方稳定的 SDK CDN -->
-  <script src="https://unpkg.com/@lark-base-open/js-sdk@0.5.1/dist/index.umd.js"></script>
   <style>
     body {
       font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
@@ -45,7 +43,7 @@
 </head>
 <body>
 
-  <div class="no-print status-hint" id="status-text">⏳ 正在初始化飞书多维表格连接...</div>
+  <div class="no-print status-hint" id="status-text">⏳ 正在载入飞书 SDK 核心模块...</div>
   <button class="btn-print no-print" onclick="window.print()">🖨️ 导出 PDF / 打印采购合同</button>
 
   <div class="contract-box">
@@ -96,10 +94,12 @@
     </div>
   </div>
 
-  <script>
+  <!-- 使用原生 ES Module 规范直接加载官方 SDK -->
+  <script type="module">
+    import { bitable } from 'https://esm.sh/@lark-base-open/js-sdk@0.5.1';
+
     const statusEl = document.getElementById('status-text');
 
-    // 格式化文本
     function formatCell(val) {
       if (val === null || val === undefined) return '';
       if (typeof val === 'number') return val;
@@ -127,17 +127,16 @@
       return String(val);
     }
 
-    // 核心渲染逻辑
-    async function loadRecord(tableId, recordId, sdk) {
+    async function loadRecord(tableId, recordId) {
       if (!tableId || !recordId) {
         statusEl.innerText = "👉 请在表格中点击选中一行 PO 记录";
         return;
       }
 
-      statusEl.innerText = "⏳ 正在读取数据...";
+      statusEl.innerText = "⏳ 正在读取 PO 单数据与明细...";
 
       try {
-        const currentTable = await sdk.base.getTableById(tableId);
+        const currentTable = await bitable.base.getTableById(tableId);
         const currentFields = await currentTable.getFieldList();
         
         const curFieldMap = {};
@@ -178,7 +177,6 @@
           } catch(e) {}
         }
 
-        // 读取关联明细
         const linkField = curFieldMap['包含SKU明细'];
         const tbody = document.getElementById('sku-tbody');
         tbody.innerHTML = '';
@@ -205,8 +203,7 @@
           return;
         }
 
-        // 寻找补货明细表
-        const tableList = await sdk.base.getTableList();
+        const tableList = await bitable.base.getTableList();
         let detailTable = null;
         for (const t of tableList) {
           const tName = await t.getName();
@@ -259,41 +256,34 @@
           tbody.appendChild(tr);
         }
 
-        statusEl.innerText = `✅ 加载完成：已成功生成 ${recordIds.length} 个 SKU 明细！`;
+        statusEl.innerText = `✅ 加载完成：已成功调取 ${recordIds.length} 个 SKU 明细！`;
       } catch (err) {
         statusEl.innerText = "❌ 读取出错: " + err.message;
         console.error(err);
       }
     }
 
-    // 初始化入口
-    window.addEventListener('DOMContentLoaded', async () => {
-      // 兼容 window.bitable 或全局注入
-      const sdk = window.bitable || (window['@lark-base-open/js-sdk'] && window['@lark-base-open/js-sdk'].bitable);
-
-      if (!sdk) {
-        statusEl.innerText = "❌ SDK 加载失败，请检查网络或刷新重试";
-        return;
-      }
-
+    try {
       statusEl.innerText = "🟢 已成功连接飞书，请点击表格中的任意 PO 单记录";
 
-      try {
-        const selection = await sdk.base.getSelection();
-        if (selection && selection.recordId) {
-          loadRecord(selection.tableId, selection.recordId, sdk);
-        }
-      } catch(e) {}
+      const selection = await bitable.base.getSelection();
+      if (selection && selection.recordId) {
+        loadRecord(selection.tableId, selection.recordId);
+      }
 
-      sdk.base.onSelectionChange(async (event) => {
+      bitable.base.onSelectionChange(async (event) => {
         const data = event.data || event;
         if (data && data.recordId) {
-          loadRecord(data.tableId, data.recordId, sdk);
+          loadRecord(data.tableId, data.recordId);
         }
       });
-    });
+    } catch(err) {
+      statusEl.innerText = "❌ 初始化异常: " + err.message;
+      console.error(err);
+    }
   </script>
 </body>
 </html>
+
 
 
