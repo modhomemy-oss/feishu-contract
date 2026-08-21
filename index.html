@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <title>采购供货合同生成器</title>
-  <!-- 引入飞书多维表格官方 SDK -->
-  <script src="https://lf-cdn.coze.cn/obj/lark-open-resources/base-sdk/1.0.0/base.js"></script>
+  <!-- 使用官方稳定的 SDK CDN -->
+  <script src="https://unpkg.com/@lark-base-open/js-sdk@0.5.1/dist/index.umd.js"></script>
   <style>
     body {
       font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      padding: 30px;
+      padding: 25px;
       color: #333;
       background-color: #f8f9fa;
     }
@@ -25,7 +25,6 @@
     table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 20px; }
     th, td { border: 1px solid #333; padding: 10px 8px; text-align: center; font-size: 13px; }
     th { background-color: #f2f2f2; }
-    .total-amount { text-align: right; font-size: 15px; font-weight: bold; margin-top: 15px; }
     .sign-area { display: flex; justify-content: space-between; margin-top: 50px; line-height: 2; font-size: 14px; }
     .btn-print {
       display: block; width: 100%; max-width: 800px; margin: 0 auto 15px auto;
@@ -33,7 +32,10 @@
       border: none; border-radius: 6px; font-size: 15px; cursor: pointer;
     }
     .btn-print:hover { background: #0056b3; }
-    .status-hint { text-align: center; color: #666; font-size: 12px; margin-bottom: 10px; }
+    .status-hint { 
+      text-align: center; font-size: 13px; margin-bottom: 15px; 
+      padding: 8px; border-radius: 4px; background: #e9ecef;
+    }
     @media print {
       body { background: #fff; padding: 0; }
       .contract-box { border: none; box-shadow: none; padding: 0; width: 100%; }
@@ -43,7 +45,7 @@
 </head>
 <body>
 
-  <div class="no-print status-hint" id="status-text">正在连接多维表格...</div>
+  <div class="no-print status-hint" id="status-text">⏳ 正在初始化飞书多维表格连接...</div>
   <button class="btn-print no-print" onclick="window.print()">🖨️ 导出 PDF / 打印采购合同</button>
 
   <div class="contract-box">
@@ -75,7 +77,7 @@
       </thead>
       <tbody id="sku-tbody">
         <tr>
-          <td colspan="6">正在读取选中的 PO 单明细...</td>
+          <td colspan="6">正在等待选中 PO 单记录...</td>
         </tr>
       </tbody>
     </table>
@@ -95,7 +97,9 @@
   </div>
 
   <script>
-    // 单元格数据文本解析
+    const statusEl = document.getElementById('status-text');
+
+    // 格式化文本
     function formatCell(val) {
       if (val === null || val === undefined) return '';
       if (typeof val === 'number') return val;
@@ -114,7 +118,6 @@
       return String(val);
     }
 
-    // 格式化日期
     function formatDate(val) {
       if (!val) return '-';
       if (typeof val === 'number') {
@@ -124,28 +127,25 @@
       return String(val);
     }
 
-    // 核心数据读取函数
-    async function loadRecord(tableId, recordId) {
-      const statusEl = document.getElementById('status-text');
+    // 核心渲染逻辑
+    async function loadRecord(tableId, recordId, sdk) {
       if (!tableId || !recordId) {
-        statusEl.innerText = "请在表格中点击选中一行 PO 记录";
+        statusEl.innerText = "👉 请在表格中点击选中一行 PO 记录";
         return;
       }
 
-      statusEl.innerText = "正在读取当前 PO 单明细数据...";
+      statusEl.innerText = "⏳ 正在读取数据...";
 
       try {
-        const currentTable = await bitable.base.getTableById(tableId);
+        const currentTable = await sdk.base.getTableById(tableId);
         const currentFields = await currentTable.getFieldList();
         
-        // 建立当前表的字段映射
         const curFieldMap = {};
         for (const f of currentFields) {
           const name = await f.getName();
           curFieldMap[name.trim()] = f;
         }
 
-        // 读取 PO 主表基础字段
         async function getCellText(name) {
           const field = curFieldMap[name];
           if (!field) return '-';
@@ -156,39 +156,42 @@
           } catch(e) { return '-'; }
         }
 
-        const poNo = await getCellText('采购单号(PO号）') !== '-' ? await getCellText('采购单号(PO号）') : await getCellText('采购单号(PO号)');
-        document.getElementById('po-no').innerText = poNo;
+        document.getElementById('po-no').innerText = 
+          (await getCellText('采购单号(PO号）') !== '-') ? await getCellText('采购单号(PO号）') : await getCellText('采购单号(PO号)');
         document.getElementById('supplier').innerText = await getCellText('供应商');
         document.getElementById('market').innerText = await getCellText('国家/市场');
         document.getElementById('total-cbm').innerText = await getCellText('整单总体积(CBM)');
 
-        // 读取日期
         const orderDateF = curFieldMap['采购下单日期'];
         if (orderDateF) {
-          const val = await (await currentTable.getCell(orderDateF.id, recordId)).getValue();
-          document.getElementById('order-date').innerText = formatDate(val);
-        }
-        const deliveryDateF = curFieldMap['预计工厂交货日期'];
-        if (deliveryDateF) {
-          const val = await (await currentTable.getCell(deliveryDateF.id, recordId)).getValue();
-          document.getElementById('delivery-date').innerText = formatDate(val);
+          try {
+            const val = await (await currentTable.getCell(orderDateF.id, recordId)).getValue();
+            document.getElementById('order-date').innerText = formatDate(val);
+          } catch(e) {}
         }
 
-        // 读取【包含SKU明细】关联的子记录 ID 列表
+        const deliveryDateF = curFieldMap['预计工厂交货日期'];
+        if (deliveryDateF) {
+          try {
+            const val = await (await currentTable.getCell(deliveryDateF.id, recordId)).getValue();
+            document.getElementById('delivery-date').innerText = formatDate(val);
+          } catch(e) {}
+        }
+
+        // 读取关联明细
         const linkField = curFieldMap['包含SKU明细'];
         const tbody = document.getElementById('sku-tbody');
         tbody.innerHTML = '';
 
         if (!linkField) {
           tbody.innerHTML = '<tr><td colspan="6">未在表中找到【包含SKU明细】字段</td></tr>';
-          statusEl.innerText = "⚠️ 未找到关联字段";
+          statusEl.innerText = "⚠️ 未找到关联字段【包含SKU明细】";
           return;
         }
 
         const linkCell = await currentTable.getCell(linkField.id, recordId);
         const linkVal = await linkCell.getValue();
 
-        // 提取关联记录 ID (支持数组或 recordIds)
         let recordIds = [];
         if (Array.isArray(linkVal)) {
           recordIds = linkVal.map(item => typeof item === 'object' ? item.record_id || item.recordId || item.id : item).filter(Boolean);
@@ -198,12 +201,12 @@
 
         if (recordIds.length === 0) {
           tbody.innerHTML = '<tr><td colspan="6">该 PO 单尚未关联任何补货需求明细</td></tr>';
-          statusEl.innerText = "✅ 数据加载完成（该单无明细）";
+          statusEl.innerText = "✅ 加载完成（该单未关联明细）";
           return;
         }
 
-        // 查找【补货需求明细表】
-        const tableList = await bitable.base.getTableList();
+        // 寻找补货明细表
+        const tableList = await sdk.base.getTableList();
         let detailTable = null;
         for (const t of tableList) {
           const tName = await t.getName();
@@ -214,7 +217,8 @@
         }
 
         if (!detailTable) {
-          tbody.innerHTML = '<tr><td colspan="6">未定位到【补货需求明细表】</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6">未找到【补货需求明细表】</td></tr>';
+          statusEl.innerText = "⚠️ 未定位到明细表";
           return;
         }
 
@@ -225,7 +229,6 @@
           dFieldMap[name.trim()] = f;
         }
 
-        // 遍历并读取子记录数据
         let rowIndex = 1;
         for (const rId of recordIds) {
           async function getDetailCell(name) {
@@ -241,7 +244,7 @@
           const reqId = await getDetailCell('需求ID');
           const sku = await getDetailCell('补货SKU');
           const skuName = await getDetailCell('sku中文名');
-          const qty = await getDetailCell('补货数量') !== '-' ? await getDetailCell('补货数量') : await getDetailCell('建议补货数量');
+          const qty = (await getDetailCell('补货数量') !== '-') ? await getDetailCell('补货数量') : await getDetailCell('建议补货数量');
           const cbm = await getDetailCell('单项预估体积(CBM)');
 
           const tr = document.createElement('tr');
@@ -256,30 +259,41 @@
           tbody.appendChild(tr);
         }
 
-        statusEl.innerText = `✅ 加载完成：已调取 ${recordIds.length} 个 SKU 明细，可点击打印！`;
+        statusEl.innerText = `✅ 加载完成：已成功生成 ${recordIds.length} 个 SKU 明细！`;
       } catch (err) {
-        statusEl.innerText = "❌ 加载失败: " + err.message;
+        statusEl.innerText = "❌ 读取出错: " + err.message;
         console.error(err);
       }
     }
 
-    // 页面初始化监听
+    // 初始化入口
     window.addEventListener('DOMContentLoaded', async () => {
+      // 兼容 window.bitable 或全局注入
+      const sdk = window.bitable || (window['@lark-base-open/js-sdk'] && window['@lark-base-open/js-sdk'].bitable);
+
+      if (!sdk) {
+        statusEl.innerText = "❌ SDK 加载失败，请检查网络或刷新重试";
+        return;
+      }
+
+      statusEl.innerText = "🟢 已成功连接飞书，请点击表格中的任意 PO 单记录";
+
       try {
-        const selection = await bitable.base.getSelection();
+        const selection = await sdk.base.getSelection();
         if (selection && selection.recordId) {
-          loadRecord(selection.tableId, selection.recordId);
+          loadRecord(selection.tableId, selection.recordId, sdk);
         }
       } catch(e) {}
 
-      bitable.base.onSelectionChange(async (event) => {
+      sdk.base.onSelectionChange(async (event) => {
         const data = event.data || event;
         if (data && data.recordId) {
-          loadRecord(data.tableId, data.recordId);
+          loadRecord(data.tableId, data.recordId, sdk);
         }
       });
     });
   </script>
 </body>
 </html>
+
 
