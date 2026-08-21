@@ -8,7 +8,7 @@
   <style>
     body {
       font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      padding: 40px;
+      padding: 30px;
       color: #333;
       background-color: #f8f9fa;
     }
@@ -20,62 +20,65 @@
       border: 1px solid #ddd;
       box-shadow: 0 4px 10px rgba(0,0,0,0.05);
     }
-    h1 { text-align: center; margin-bottom: 30px; letter-spacing: 2px; }
-    .meta-info { display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 15px; }
+    h1 { text-align: center; margin-bottom: 25px; letter-spacing: 2px; }
+    .meta-info { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 14px; }
     table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 20px; }
-    th, td { border: 1px solid #333; padding: 10px; text-align: center; font-size: 14px; }
+    th, td { border: 1px solid #333; padding: 10px 8px; text-align: center; font-size: 13px; }
     th { background-color: #f2f2f2; }
-    .total-amount { text-align: right; font-size: 16px; font-weight: bold; margin-top: 10px; }
-    .sign-area { display: flex; justify-content: space-between; margin-top: 60px; line-height: 2; }
+    .total-amount { text-align: right; font-size: 15px; font-weight: bold; margin-top: 15px; }
+    .sign-area { display: flex; justify-content: space-between; margin-top: 50px; line-height: 2; font-size: 14px; }
     .btn-print {
-      display: block; width: 100%; max-width: 800px; margin: 0 auto 20px auto;
-      padding: 12px; background: #007bff; color: #fff; text-align: center;
-      border: none; border-radius: 6px; font-size: 16px; cursor: pointer;
+      display: block; width: 100%; max-width: 800px; margin: 0 auto 15px auto;
+      padding: 10px; background: #007bff; color: #fff; text-align: center;
+      border: none; border-radius: 6px; font-size: 15px; cursor: pointer;
     }
     .btn-print:hover { background: #0056b3; }
+    .status-hint { text-align: center; color: #666; font-size: 12px; margin-bottom: 10px; }
     @media print {
       body { background: #fff; padding: 0; }
-      .contract-box { border: none; box-shadow: none; padding: 0; }
+      .contract-box { border: none; box-shadow: none; padding: 0; width: 100%; }
       .no-print { display: none !important; }
     }
   </style>
 </head>
 <body>
 
-  <button class="btn-print no-print" onclick="window.print()">🖨️ 导出 PDF / 打印合同</button>
+  <div class="no-print status-hint" id="status-text">正在连接多维表格...</div>
+  <button class="btn-print no-print" onclick="window.print()">🖨️ 导出 PDF / 打印采购合同</button>
 
   <div class="contract-box">
     <h1>产品采购供货合同</h1>
     
     <div class="meta-info">
-      <div><strong>合同/PO编号：</strong><span id="po-no">请在多维表格中选中一条记录</span></div>
-      <div><strong>签约日期：</strong><span id="order-date">-</span></div>
+      <div><strong>采购单号(PO号)：</strong><span id="po-no">-</span></div>
+      <div><strong>采购下单日期：</strong><span id="order-date">-</span></div>
     </div>
     <div class="meta-info">
-      <div><strong>供货方（乙方）：</strong><span id="supplier">-</span></div>
-      <div><strong>预计交期：</strong><span id="delivery-date">-</span></div>
+      <div><strong>供货方（供应商）：</strong><span id="supplier">-</span></div>
+      <div><strong>预计工厂交货日期：</strong><span id="delivery-date">-</span></div>
+    </div>
+    <div class="meta-info">
+      <div><strong>目标市场：</strong><span id="market">-</span></div>
+      <div><strong>整单总体积(CBM)：</strong><span id="total-cbm">-</span></div>
     </div>
 
     <table>
       <thead>
         <tr>
           <th>序号</th>
-          <th>SKU / 款号</th>
-          <th>结算数量</th>
-          <th>采购单价 (元)</th>
-          <th>货款小计 (元)</th>
+          <th>需求ID</th>
+          <th>补货SKU</th>
+          <th>SKU中文名</th>
+          <th>补货数量</th>
+          <th>单项预估体积(CBM)</th>
         </tr>
       </thead>
       <tbody id="sku-tbody">
         <tr>
-          <td colspan="5">正在读取多维表格数据...</td>
+          <td colspan="6">正在读取选中的 PO 单明细...</td>
         </tr>
       </tbody>
     </table>
-
-    <div class="total-amount">
-      货款总计：¥ <span id="total-amount">0.00</span>
-    </div>
 
     <div class="sign-area">
       <div>
@@ -92,48 +95,191 @@
   </div>
 
   <script>
-    // 监听多维表格中光标点击选中的记录
-    bitable.base.onSelectionChange(async (event) => {
-      const { tableId, recordId } = event.data;
-      if (!tableId || !recordId) return;
+    // 单元格数据文本解析
+    function formatCell(val) {
+      if (val === null || val === undefined) return '';
+      if (typeof val === 'number') return val;
+      if (typeof val === 'string') return val;
+      if (Array.isArray(val)) {
+        return val.map(item => {
+          if (typeof item === 'object' && item !== null) {
+            return item.text || item.name || '';
+          }
+          return item;
+        }).filter(Boolean).join(', ');
+      }
+      if (typeof val === 'object') {
+        return val.text || val.name || '';
+      }
+      return String(val);
+    }
+
+    // 格式化日期
+    function formatDate(val) {
+      if (!val) return '-';
+      if (typeof val === 'number') {
+        const d = new Date(val);
+        return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      }
+      return String(val);
+    }
+
+    // 核心数据读取函数
+    async function loadRecord(tableId, recordId) {
+      const statusEl = document.getElementById('status-text');
+      if (!tableId || !recordId) {
+        statusEl.innerText = "请在表格中点击选中一行 PO 记录";
+        return;
+      }
+
+      statusEl.innerText = "正在读取当前 PO 单明细数据...";
 
       try {
-        const table = await bitable.base.getTableById(tableId);
-        const record = await table.getRecordById(recordId);
-        const fields = record.fields;
+        const currentTable = await bitable.base.getTableById(tableId);
+        const currentFields = await currentTable.getFieldList();
+        
+        // 建立当前表的字段映射
+        const curFieldMap = {};
+        for (const f of currentFields) {
+          const name = await f.getName();
+          curFieldMap[name.trim()] = f;
+        }
 
-        // 读取字段并填入网页（字段名与你表格保持一致）
-        document.getElementById('po-no').innerText = fields['采购单号(PO号)'] || '未填写';
-        document.getElementById('supplier').innerText = fields['涉及供应商'] || fields['涉及供应商真名'] || '未填写';
-        document.getElementById('order-date').innerText = fields['采购下单日期'] ? new Date(fields['采购下单日期']).toLocaleDateString() : '-';
-        document.getElementById('delivery-date').innerText = fields['预计工厂交期'] ? new Date(fields['预计工厂交期']).toLocaleDateString() : '-';
-        document.getElementById('total-amount').innerText = fields['整单货款总额(RMB)'] || fields['最终应付总额(RMB)'] || '0.00';
+        // 读取 PO 主表基础字段
+        async function getCellText(name) {
+          const field = curFieldMap[name];
+          if (!field) return '-';
+          try {
+            const cell = await currentTable.getCell(field.id, recordId);
+            const val = await cell.getValue();
+            return formatCell(val) || '-';
+          } catch(e) { return '-'; }
+        }
 
-        // 尝试提取 SKU 明细列表并渲染
-        const skuList = fields['包含SKU列表'] || [];
-        const qtyList = fields['各SKU实下单数'] || [];
+        const poNo = await getCellText('采购单号(PO号）') !== '-' ? await getCellText('采购单号(PO号）') : await getCellText('采购单号(PO号)');
+        document.getElementById('po-no').innerText = poNo;
+        document.getElementById('supplier').innerText = await getCellText('供应商');
+        document.getElementById('market').innerText = await getCellText('国家/市场');
+        document.getElementById('total-cbm').innerText = await getCellText('整单总体积(CBM)');
+
+        // 读取日期
+        const orderDateF = curFieldMap['采购下单日期'];
+        if (orderDateF) {
+          const val = await (await currentTable.getCell(orderDateF.id, recordId)).getValue();
+          document.getElementById('order-date').innerText = formatDate(val);
+        }
+        const deliveryDateF = curFieldMap['预计工厂交货日期'];
+        if (deliveryDateF) {
+          const val = await (await currentTable.getCell(deliveryDateF.id, recordId)).getValue();
+          document.getElementById('delivery-date').innerText = formatDate(val);
+        }
+
+        // 读取【包含SKU明细】关联的子记录 ID 列表
+        const linkField = curFieldMap['包含SKU明细'];
         const tbody = document.getElementById('sku-tbody');
         tbody.innerHTML = '';
 
-        if (Array.isArray(skuList) && skuList.length > 0) {
-          skuList.forEach((sku, index) => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-              <td>${index + 1}</td>
-              <td>${sku.text || sku}</td>
-              <td>${qtyList[index] || '-'}</td>
-              <td>-</td>
-              <td>-</td>
-            `;
-            tbody.appendChild(tr);
-          });
-        } else {
-          tbody.innerHTML = '<tr><td colspan="5">该订单暂无关联明细</td></tr>';
+        if (!linkField) {
+          tbody.innerHTML = '<tr><td colspan="6">未在表中找到【包含SKU明细】字段</td></tr>';
+          statusEl.innerText = "⚠️ 未找到关联字段";
+          return;
         }
+
+        const linkCell = await currentTable.getCell(linkField.id, recordId);
+        const linkVal = await linkCell.getValue();
+
+        // 提取关联记录 ID (支持数组或 recordIds)
+        let recordIds = [];
+        if (Array.isArray(linkVal)) {
+          recordIds = linkVal.map(item => typeof item === 'object' ? item.record_id || item.recordId || item.id : item).filter(Boolean);
+        } else if (linkVal && linkVal.recordIds) {
+          recordIds = linkVal.recordIds;
+        }
+
+        if (recordIds.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6">该 PO 单尚未关联任何补货需求明细</td></tr>';
+          statusEl.innerText = "✅ 数据加载完成（该单无明细）";
+          return;
+        }
+
+        // 查找【补货需求明细表】
+        const tableList = await bitable.base.getTableList();
+        let detailTable = null;
+        for (const t of tableList) {
+          const tName = await t.getName();
+          if (tName.includes('补货需求明细') || tName.includes('明细')) {
+            detailTable = t;
+            break;
+          }
+        }
+
+        if (!detailTable) {
+          tbody.innerHTML = '<tr><td colspan="6">未定位到【补货需求明细表】</td></tr>';
+          return;
+        }
+
+        const detailFields = await detailTable.getFieldList();
+        const dFieldMap = {};
+        for (const f of detailFields) {
+          const name = await f.getName();
+          dFieldMap[name.trim()] = f;
+        }
+
+        // 遍历并读取子记录数据
+        let rowIndex = 1;
+        for (const rId of recordIds) {
+          async function getDetailCell(name) {
+            const field = dFieldMap[name];
+            if (!field) return '-';
+            try {
+              const cell = await detailTable.getCell(field.id, rId);
+              const val = await cell.getValue();
+              return formatCell(val) || '-';
+            } catch(e) { return '-'; }
+          }
+
+          const reqId = await getDetailCell('需求ID');
+          const sku = await getDetailCell('补货SKU');
+          const skuName = await getDetailCell('sku中文名');
+          const qty = await getDetailCell('补货数量') !== '-' ? await getDetailCell('补货数量') : await getDetailCell('建议补货数量');
+          const cbm = await getDetailCell('单项预估体积(CBM)');
+
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${rowIndex++}</td>
+            <td>${reqId}</td>
+            <td><strong>${sku}</strong></td>
+            <td>${skuName}</td>
+            <td>${qty}</td>
+            <td>${cbm}</td>
+          `;
+          tbody.appendChild(tr);
+        }
+
+        statusEl.innerText = `✅ 加载完成：已调取 ${recordIds.length} 个 SKU 明细，可点击打印！`;
       } catch (err) {
-        console.error("读取数据异常:", err);
+        statusEl.innerText = "❌ 加载失败: " + err.message;
+        console.error(err);
       }
+    }
+
+    // 页面初始化监听
+    window.addEventListener('DOMContentLoaded', async () => {
+      try {
+        const selection = await bitable.base.getSelection();
+        if (selection && selection.recordId) {
+          loadRecord(selection.tableId, selection.recordId);
+        }
+      } catch(e) {}
+
+      bitable.base.onSelectionChange(async (event) => {
+        const data = event.data || event;
+        if (data && data.recordId) {
+          loadRecord(data.tableId, data.recordId);
+        }
+      });
     });
   </script>
 </body>
 </html>
+
