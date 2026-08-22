@@ -94,7 +94,6 @@
     </div>
   </div>
 
-  <!-- 使用原生 ES Module 规范直接加载官方 SDK -->
   <script type="module">
     import { bitable } from 'https://esm.sh/@lark-base-open/js-sdk@0.5.1';
 
@@ -149,14 +148,15 @@
           const field = curFieldMap[name];
           if (!field) return '-';
           try {
-            const cell = await currentTable.getCell(field.id, recordId);
-            const val = await cell.getValue();
+            const val = await currentTable.getCellValue(field.id, recordId);
             return formatCell(val) || '-';
           } catch(e) { return '-'; }
         }
 
-        document.getElementById('po-no').innerText = 
-          (await getCellText('采购单号(PO号）') !== '-') ? await getCellText('采购单号(PO号）') : await getCellText('采购单号(PO号)');
+        const poNo = (await getCellText('采购单号(PO号）') !== '-') 
+          ? await getCellText('采购单号(PO号）') 
+          : await getCellText('采购单号(PO号)');
+        document.getElementById('po-no').innerText = poNo;
         document.getElementById('supplier').innerText = await getCellText('供应商');
         document.getElementById('market').innerText = await getCellText('国家/市场');
         document.getElementById('total-cbm').innerText = await getCellText('整单总体积(CBM)');
@@ -164,7 +164,7 @@
         const orderDateF = curFieldMap['采购下单日期'];
         if (orderDateF) {
           try {
-            const val = await (await currentTable.getCell(orderDateF.id, recordId)).getValue();
+            const val = await currentTable.getCellValue(orderDateF.id, recordId);
             document.getElementById('order-date').innerText = formatDate(val);
           } catch(e) {}
         }
@@ -172,7 +172,7 @@
         const deliveryDateF = curFieldMap['预计工厂交货日期'];
         if (deliveryDateF) {
           try {
-            const val = await (await currentTable.getCell(deliveryDateF.id, recordId)).getValue();
+            const val = await currentTable.getCellValue(deliveryDateF.id, recordId);
             document.getElementById('delivery-date').innerText = formatDate(val);
           } catch(e) {}
         }
@@ -187,8 +187,7 @@
           return;
         }
 
-        const linkCell = await currentTable.getCell(linkField.id, recordId);
-        const linkVal = await linkCell.getValue();
+        const linkVal = await currentTable.getCellValue(linkField.id, recordId);
 
         let recordIds = [];
         if (Array.isArray(linkVal)) {
@@ -232,8 +231,7 @@
             const field = dFieldMap[name];
             if (!field) return '-';
             try {
-              const cell = await detailTable.getCell(field.id, rId);
-              const val = await cell.getValue();
+              const val = await detailTable.getCellValue(field.id, rId);
               return formatCell(val) || '-';
             } catch(e) { return '-'; }
           }
@@ -263,27 +261,36 @@
       }
     }
 
-    try {
-      statusEl.innerText = "🟢 已成功连接飞书，请点击表格中的任意 PO 单记录";
+    async function init() {
+      try {
+        statusEl.innerText = "🟢 已连接飞书，正在检查选中项...";
 
-      const selection = await bitable.base.getSelection();
-      if (selection && selection.recordId) {
-        loadRecord(selection.tableId, selection.recordId);
-      }
+        // 1. 挂载选中变更监听事件
+        bitable.base.onSelectionChange(async (event) => {
+          const selection = event.data || await bitable.base.getSelection();
+          if (selection && selection.recordId) {
+            loadRecord(selection.tableId, selection.recordId);
+          }
+        });
 
-      bitable.base.onSelectionChange(async (event) => {
-        const data = event.data || event;
-        if (data && data.recordId) {
-          loadRecord(data.tableId, data.recordId);
+        // 2. 初始化时主动获取当前选中的记录
+        const selection = await bitable.base.getSelection();
+        if (selection && selection.recordId) {
+          loadRecord(selection.tableId, selection.recordId);
+        } else {
+          statusEl.innerText = "👉 请在多维表格中点击选中一行 PO 记录";
         }
-      });
-    } catch(err) {
-      statusEl.innerText = "❌ 初始化异常: " + err.message;
-      console.error(err);
+      } catch (err) {
+        statusEl.innerText = "❌ 初始化异常: " + err.message;
+        console.error(err);
+      }
     }
+
+    init();
   </script>
 </body>
 </html>
+
 
 
 
