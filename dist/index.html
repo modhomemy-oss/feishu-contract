@@ -2,28 +2,32 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>采购供货合同生成器</title>
+  <!-- 1. 引入飞书官方 JSSDK (使用标准 UMD CDN，防止模块化通信断连) -->
+  <script src="https://unpkg.com/@lark-base-open/js-sdk@0.5.1/dist/index.umd.js"></script>
   <style>
     body {
       font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      padding: 25px;
+      padding: 20px;
       color: #333;
       background-color: #f8f9fa;
+      margin: 0;
     }
     .contract-box {
       max-width: 800px;
       margin: 0 auto;
       background: #fff;
-      padding: 40px;
+      padding: 30px;
       border: 1px solid #ddd;
       box-shadow: 0 4px 10px rgba(0,0,0,0.05);
     }
-    h1 { text-align: center; margin-bottom: 25px; letter-spacing: 2px; }
+    h1 { text-align: center; margin-bottom: 25px; letter-spacing: 2px; font-size: 22px; }
     .meta-info { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 14px; }
     table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 20px; }
-    th, td { border: 1px solid #333; padding: 10px 8px; text-align: center; font-size: 13px; }
+    th, td { border: 1px solid #333; padding: 8px 6px; text-align: center; font-size: 13px; }
     th { background-color: #f2f2f2; }
-    .sign-area { display: flex; justify-content: space-between; margin-top: 50px; line-height: 2; font-size: 14px; }
+    .sign-area { display: flex; justify-content: space-between; margin-top: 40px; line-height: 2; font-size: 14px; }
     .btn-print {
       display: block; width: 100%; max-width: 800px; margin: 0 auto 15px auto;
       padding: 10px; background: #007bff; color: #fff; text-align: center;
@@ -33,6 +37,7 @@
     .status-hint { 
       text-align: center; font-size: 13px; margin-bottom: 15px; 
       padding: 8px; border-radius: 4px; background: #e9ecef;
+      max-width: 800px; margin-left: auto; margin-right: auto;
     }
     @media print {
       body { background: #fff; padding: 0; }
@@ -43,7 +48,7 @@
 </head>
 <body>
 
-  <div class="no-print status-hint" id="status-text">⏳ 正在载入飞书 SDK 核心模块...</div>
+  <div class="no-print status-hint" id="status-text">⏳ 正在初始化飞书环境...</div>
   <button class="btn-print no-print" onclick="window.print()">🖨️ 导出 PDF / 打印采购合同</button>
 
   <div class="contract-box">
@@ -94,9 +99,9 @@
     </div>
   </div>
 
-  <script type="module">
-    import { bitable } from 'https://esm.sh/@lark-base-open/js-sdk@0.5.1';
-
+  <script>
+    // 兼容全局 bitable 对象
+    const bitable = window.bitable || window.lark?.bitable;
     const statusEl = document.getElementById('status-text');
 
     function formatCell(val) {
@@ -127,7 +132,7 @@
     }
 
     async function loadRecord(tableId, recordId) {
-      if (!tableId || !recordId) {
+      if (!recordId) {
         statusEl.innerText = "👉 请在表格中点击选中一行 PO 记录";
         return;
       }
@@ -135,9 +140,20 @@
       statusEl.innerText = "⏳ 正在读取 PO 单数据与明细...";
 
       try {
-        const currentTable = await bitable.base.getTableById(tableId);
+        // 安全获取当前激活的表或通过 ID 获取
+        let currentTable;
+        if (tableId) {
+          currentTable = await bitable.base.getTableById(tableId);
+        } else {
+          currentTable = await bitable.base.getActiveTable();
+        }
+
+        if (!currentTable) {
+          statusEl.innerText = "❌ 无法定位当前数据表";
+          return;
+        }
+
         const currentFields = await currentTable.getFieldList();
-        
         const curFieldMap = {};
         for (const f of currentFields) {
           const name = await f.getName();
@@ -153,9 +169,11 @@
           } catch(e) { return '-'; }
         }
 
+        // 读取 PO 主表信息
         const poNo = (await getCellText('采购单号(PO号）') !== '-') 
           ? await getCellText('采购单号(PO号）') 
           : await getCellText('采购单号(PO号)');
+        
         document.getElementById('po-no').innerText = poNo;
         document.getElementById('supplier').innerText = await getCellText('供应商');
         document.getElementById('market').innerText = await getCellText('国家/市场');
@@ -177,6 +195,7 @@
           } catch(e) {}
         }
 
+        // 处理关联的 SKU 明细
         const linkField = curFieldMap['包含SKU明细'];
         const tbody = document.getElementById('sku-tbody');
         tbody.innerHTML = '';
@@ -202,6 +221,7 @@
           return;
         }
 
+        // 定位明细子表
         const tableList = await bitable.base.getTableList();
         let detailTable = null;
         for (const t of tableList) {
@@ -261,24 +281,32 @@
       }
     }
 
+    // 安全初始化逻辑
     async function init() {
-      try {
-        statusEl.innerText = "🟢 已连接飞书，正在检查选中项...";
+      if (!bitable || !bitable.base) {
+        statusEl.innerText = "❌ SDK 载入失败，请确保在飞书内打开此插件";
+        return;
+      }
 
-        // 1. 挂载选中变更监听事件
+      try {
+        statusEl.innerText = "🟢 已连接飞书，请点击表格中的任意 PO 单记录";
+
+        // 绑定选中项切换监听
         bitable.base.onSelectionChange(async (event) => {
-          const selection = event.data || await bitable.base.getSelection();
-          if (selection && selection.recordId) {
-            loadRecord(selection.tableId, selection.recordId);
+          try {
+            const selection = event?.data || await bitable.base.getSelection();
+            if (selection && selection.recordId) {
+              loadRecord(selection.tableId, selection.recordId);
+            }
+          } catch(e) {
+            console.warn("Selection event error:", e);
           }
         });
 
-        // 2. 初始化时主动获取当前选中的记录
-        const selection = await bitable.base.getSelection();
-        if (selection && selection.recordId) {
-          loadRecord(selection.tableId, selection.recordId);
-        } else {
-          statusEl.innerText = "👉 请在多维表格中点击选中一行 PO 记录";
+        // 首次启动读取
+        const initialSelection = await bitable.base.getSelection();
+        if (initialSelection && initialSelection.recordId) {
+          loadRecord(initialSelection.tableId, initialSelection.recordId);
         }
       } catch (err) {
         statusEl.innerText = "❌ 初始化异常: " + err.message;
@@ -286,10 +314,14 @@
       }
     }
 
-    init();
+    // 延迟 100ms 启动，留足 SDK 内部通信 Handshake 时间
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(init, 100);
+    });
   </script>
 </body>
 </html>
+
 
 
 
