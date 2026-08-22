@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>采购供货合同生成器</title>
+  <!-- 引入官方标准的 UMD 格式 SDK，确保与飞书边栏百分百握手成功 -->
+  <script src="https://unpkg.com/@lark-base-open/js-sdk@0.5.1/dist/index.umd.js"></script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -17,14 +19,14 @@
       max-width: 800px;
       margin: 0 auto;
       background: #fff;
-      padding: 35px;
+      padding: 30px;
       border: 1px solid #ddd;
       box-shadow: 0 4px 10px rgba(0,0,0,0.05);
     }
     h1 { text-align: center; margin-bottom: 25px; letter-spacing: 2px; font-size: 22px; }
     .meta-info { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 14px; }
     table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 20px; }
-    th, td { border: 1px solid #333; padding: 10px 8px; text-align: center; font-size: 13px; }
+    th, td { border: 1px solid #333; padding: 8px 6px; text-align: center; font-size: 13px; }
     th { background-color: #f2f2f2; font-weight: bold; }
     .sign-area { display: flex; justify-content: space-between; margin-top: 40px; line-height: 2; font-size: 14px; }
     .btn-print {
@@ -47,7 +49,7 @@
 </head>
 <body>
 
-  <div class="no-print status-hint" id="status-text">⏳ 正在尝试与飞书多维表格连接...</div>
+  <div class="no-print status-hint" id="status-text">⏳ 正在连接多维表格边栏环境...</div>
   <button class="btn-print no-print" onclick="window.print()">🖨️ 导出 PDF / 打印采购合同</button>
 
   <div class="contract-box">
@@ -98,12 +100,11 @@
     </div>
   </div>
 
-  <script type="module">
-    import { bitable } from 'https://esm.sh/@lark-base-open/js-sdk@0.5.1';
-
+  <script>
+    // 安全获取全局 bitable 对象 (来自 UMD CDN 脚本)
+    const bitable = window.bitable || window.lark?.bitable;
     const statusEl = document.getElementById('status-text');
 
-    // 通用单元格格式化解析
     function formatCell(val) {
       if (val === null || val === undefined) return '';
       if (typeof val === 'number') return val;
@@ -122,7 +123,6 @@
       return String(val);
     }
 
-    // 日期格式化
     function formatDate(val) {
       if (!val) return '-';
       if (typeof val === 'number') {
@@ -132,7 +132,6 @@
       return String(val);
     }
 
-    // 提取关联记录 ID 数组的算法
     function parseLinkedRecordIds(linkVal) {
       if (!linkVal) return [];
       if (Array.isArray(linkVal)) {
@@ -150,17 +149,15 @@
       return [];
     }
 
-    // 根据选中的 PO 单记录加载数据
     async function loadRecord(tableId, recordId) {
       if (!recordId) {
-        statusEl.innerText = "👉 请在多维表格中点击选中一行采购单 (PO) 记录";
+        statusEl.innerText = "👉 请在表格中点击选中一行采购单 (PO) 记录";
         return;
       }
 
-      statusEl.innerText = "⏳ 正在拉取选中采购单及其关联的 SKU 数据...";
+      statusEl.innerText = "⏳ 正在读取 PO 单主信息及关联 SKU 明细...";
 
       try {
-        // 1. 获取主表
         const currentTable = tableId ? await bitable.base.getTableById(tableId) : await bitable.base.getActiveTable();
         const currentFields = await currentTable.getFieldList();
         
@@ -183,7 +180,6 @@
           return '-';
         }
 
-        // 2. 渲染主表信息（支持多种常见命名字段模糊匹配）
         document.getElementById('po-no').innerText = await getCellText(['采购单号(PO号）', '采购单号(PO号)', 'PO号', '采购单号']);
         document.getElementById('supplier').innerText = await getCellText(['供应商', '供货方', '供应商名称']);
         document.getElementById('market').innerText = await getCellText(['国家/市场', '目标市场', '国家']);
@@ -195,10 +191,7 @@
         const deliveryDateVal = await getCellText(['预计工厂交货日期', '交货日期', '预计交货期']);
         document.getElementById('delivery-date').innerText = formatDate(deliveryDateVal !== '-' ? deliveryDateVal : '');
 
-        // 3. 寻找关联 SKU 的字段
         let linkField = curFieldMap['包含SKU明细'] || curFieldMap['SKU明细'] || curFieldMap['补货需求明细'] || curFieldMap['明细'];
-        
-        // 如果没精确匹配到，尝试搜索包含“明细”或“SKU”的关联字段
         if (!linkField) {
           for (const name in curFieldMap) {
             if (name.includes('明细') || name.includes('SKU')) {
@@ -212,26 +205,22 @@
         tbody.innerHTML = '';
 
         if (!linkField) {
-          tbody.innerHTML = '<tr><td colspan="6" style="color:red;">未在当前数据表找到关联 SKU 的字段（如【包含SKU明细】）</td></tr>';
-          statusEl.innerText = "⚠️ 请检查表头中是否存在【包含SKU明细】关联字段";
+          tbody.innerHTML = '<tr><td colspan="6" style="color:red;">未在表中找到关联 SKU 的字段（如【包含SKU明细】）</td></tr>';
+          statusEl.innerText = "⚠️ 请检查表中是否存在关联字段【包含SKU明细】";
           return;
         }
 
-        // 4. 解析关联字段提取关联的记录 ID 列表
         const linkVal = await currentTable.getCellValue(linkField.id, recordId);
         const recordIds = parseLinkedRecordIds(linkVal);
 
         if (recordIds.length === 0) {
           tbody.innerHTML = '<tr><td colspan="6">当前选择的 PO 采购单未关联任何 SKU 需求明细</td></tr>';
-          statusEl.innerText = "✅ 已加载主单（注：该 PO 单关联明细为空）";
+          statusEl.innerText = "✅ 已读取主单（注：关联明细为空）";
           return;
         }
 
-        // 5. 寻找到被关联的“明细子表”
         const tableList = await bitable.base.getTableList();
         let detailTable = null;
-
-        // 优先匹配包含“补货需求明细”或“明细”的表
         for (const t of tableList) {
           const tName = await t.getName();
           if (tName.includes('补货需求明细') || tName.includes('明细') || tName.includes('SKU')) {
@@ -241,17 +230,15 @@
         }
 
         if (!detailTable && tableList.length > 1) {
-          // 如果名字没对上，兜底选择除当前主表外的另一张表
           detailTable = tableList.find(t => t.id !== currentTable.id);
         }
 
         if (!detailTable) {
-          tbody.innerHTML = '<tr><td colspan="6" style="color:red;">未在当前多维表格中定位到【补货需求明细表】</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="color:red;">未找到【补货需求明细表】</td></tr>';
           statusEl.innerText = "⚠️ 未能识别明细子表";
           return;
         }
 
-        // 6. 建立明细子表的字段映射
         const detailFields = await detailTable.getFieldList();
         const dFieldMap = {};
         for (const f of detailFields) {
@@ -272,7 +259,6 @@
           return '-';
         }
 
-        // 7. 遍历关联的所有明细 ID，逐行拼装表格
         let rowIndex = 1;
         for (const rId of recordIds) {
           const reqId = await getDetailValue(rId, ['需求ID', 'ID']);
@@ -293,43 +279,47 @@
           tbody.appendChild(tr);
         }
 
-        statusEl.innerText = `✅ 采购合同生成成功！已调取关联的 ${recordIds.length} 项 SKU 明细`;
+        statusEl.innerText = `✅ 合同生成成功！已加载 ${recordIds.length} 项 SKU 明细`;
 
       } catch (err) {
-        statusEl.innerText = "❌ 读取明细出错: " + err.message;
+        statusEl.innerText = "❌ 读取明细失败: " + err.message;
         console.error(err);
       }
     }
 
-    // 核心初始化逻辑
     async function init() {
-      try {
-        statusEl.innerText = "🟢 已成功连接飞书！请在多维表格中选中任意一行采购单 (PO)";
+      if (!bitable || !bitable.base) {
+        statusEl.innerText = "❌ 未检测到多维表格环境，请确保在多维表格边栏中打开";
+        return;
+      }
 
-        // 1. 尝试初始化获取当前高亮选中的行
+      try {
+        statusEl.innerText = "🟢 已成功连接边栏！请点击表格中的任意 PO 单记录";
+
         const selection = await bitable.base.getSelection();
         if (selection && selection.recordId) {
           loadRecord(selection.tableId, selection.recordId);
         }
 
-        // 2. 监听用户选中行切换事件
         bitable.base.onSelectionChange(async (event) => {
           const selection = event?.data || await bitable.base.getSelection();
           if (selection && selection.recordId) {
             loadRecord(selection.tableId, selection.recordId);
           }
         });
-
-      } catch (err) {
-        statusEl.innerText = "❌ 飞书 SDK 连接异常: " + err.message;
-        console.error(err);
+      } catch(e) {
+        console.warn("Init notice:", e);
       }
     }
 
-    init();
+    // 延时 200ms 确保与多维表格边栏 Handshake 通信完毕
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(init, 200);
+    });
   </script>
 </body>
 </html>
+
 
 
 
