@@ -4,41 +4,39 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>采购供货合同生成器</title>
-  <!-- 引入官方标准的 UMD 格式 SDK，确保与飞书边栏百分百握手成功 -->
-  <script src="https://unpkg.com/@lark-base-open/js-sdk@0.5.1/dist/index.umd.js"></script>
+  <script src="https://registry.npmmirror.com/@lark-base-open/js-sdk/0.5.1/files/dist/index.umd.js"></script>
   <style>
     * { box-sizing: border-box; }
     body {
       font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-      padding: 20px;
+      padding: 15px;
       color: #333;
       background-color: #f8f9fa;
       margin: 0;
     }
     .contract-box {
-      max-width: 800px;
+      max-width: 100%;
       margin: 0 auto;
       background: #fff;
-      padding: 30px;
+      padding: 20px;
       border: 1px solid #ddd;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
-    h1 { text-align: center; margin-bottom: 25px; letter-spacing: 2px; font-size: 22px; }
-    .meta-info { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 14px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 20px; }
-    th, td { border: 1px solid #333; padding: 8px 6px; text-align: center; font-size: 13px; }
+    h1 { text-align: center; margin-bottom: 20px; font-size: 18px; letter-spacing: 1px; }
+    .meta-info { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 15px; }
+    th, td { border: 1px solid #333; padding: 6px 4px; text-align: center; font-size: 12px; }
     th { background-color: #f2f2f2; font-weight: bold; }
-    .sign-area { display: flex; justify-content: space-between; margin-top: 40px; line-height: 2; font-size: 14px; }
+    .sign-area { display: flex; justify-content: space-between; margin-top: 30px; line-height: 1.8; font-size: 12px; }
     .btn-print {
-      display: block; width: 100%; max-width: 800px; margin: 0 auto 15px auto;
-      padding: 10px; background: #007bff; color: #fff; text-align: center;
-      border: none; border-radius: 6px; font-size: 15px; cursor: pointer;
+      display: block; width: 100%; margin: 0 auto 12px auto;
+      padding: 8px; background: #007bff; color: #fff; text-align: center;
+      border: none; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: bold;
     }
     .btn-print:hover { background: #0056b3; }
     .status-hint { 
-      text-align: center; font-size: 13px; margin: 0 auto 15px auto; 
-      padding: 8px 12px; border-radius: 4px; background: #e9ecef;
-      max-width: 800px; word-break: break-all;
+      text-align: center; font-size: 12px; margin-bottom: 12px; 
+      padding: 6px 10px; border-radius: 4px; background: #e9ecef; word-break: break-all;
     }
     @media print {
       body { background: #fff; padding: 0; }
@@ -49,23 +47,23 @@
 </head>
 <body>
 
-  <div class="no-print status-hint" id="status-text">⏳ 正在连接多维表格边栏环境...</div>
+  <div class="no-print status-hint" id="status-text">⏳ 正在初始化合同生成器...</div>
   <button class="btn-print no-print" onclick="window.print()">🖨️ 导出 PDF / 打印采购合同</button>
 
   <div class="contract-box">
     <h1>产品采购供货合同</h1>
     
     <div class="meta-info">
-      <div><strong>采购单号(PO号)：</strong><span id="po-no">-</span></div>
-      <div><strong>采购下单日期：</strong><span id="order-date">-</span></div>
+      <div><strong>PO号：</strong><span id="po-no">-</span></div>
+      <div><strong>下单日期：</strong><span id="order-date">-</span></div>
     </div>
     <div class="meta-info">
-      <div><strong>供货方（供应商）：</strong><span id="supplier">-</span></div>
-      <div><strong>预计工厂交货日期：</strong><span id="delivery-date">-</span></div>
+      <div><strong>供应商：</strong><span id="supplier">-</span></div>
+      <div><strong>预计交货期：</strong><span id="delivery-date">-</span></div>
     </div>
     <div class="meta-info">
       <div><strong>目标市场：</strong><span id="market">-</span></div>
-      <div><strong>整单总体积(CBM)：</strong><span id="total-cbm">-</span></div>
+      <div><strong>整单体积(CBM)：</strong><span id="total-cbm">-</span></div>
     </div>
 
     <table>
@@ -75,8 +73,8 @@
           <th>需求ID</th>
           <th>补货SKU</th>
           <th>SKU中文名</th>
-          <th>补货数量</th>
-          <th>单项预估体积(CBM)</th>
+          <th>数量</th>
+          <th>体积(CBM)</th>
         </tr>
       </thead>
       <tbody id="sku-tbody">
@@ -101,7 +99,9 @@
   </div>
 
   <script>
-    // 安全获取全局 bitable 对象 (来自 UMD CDN 脚本)
+    // 防崩溃保护：拦截飞书宿主调用的 resizeWidget 异常
+    window.activeBitableWidget = window.activeBitableWidget || { resize: () => {} };
+
     const bitable = window.bitable || window.lark?.bitable;
     const statusEl = document.getElementById('status-text');
 
@@ -151,11 +151,11 @@
 
     async function loadRecord(tableId, recordId) {
       if (!recordId) {
-        statusEl.innerText = "👉 请在表格中点击选中一行采购单 (PO) 记录";
+        statusEl.innerText = "👉 请在表格中点击选中一行 PO 记录";
         return;
       }
 
-      statusEl.innerText = "⏳ 正在读取 PO 单主信息及关联 SKU 明细...";
+      statusEl.innerText = "⏳ 正在读取 PO 单及 SKU 明细...";
 
       try {
         const currentTable = tableId ? await bitable.base.getTableById(tableId) : await bitable.base.getActiveTable();
@@ -205,8 +205,8 @@
         tbody.innerHTML = '';
 
         if (!linkField) {
-          tbody.innerHTML = '<tr><td colspan="6" style="color:red;">未在表中找到关联 SKU 的字段（如【包含SKU明细】）</td></tr>';
-          statusEl.innerText = "⚠️ 请检查表中是否存在关联字段【包含SKU明细】";
+          tbody.innerHTML = '<tr><td colspan="6" style="color:red;">未找到关联 SKU 的字段</td></tr>';
+          statusEl.innerText = "⚠️ 未找到【包含SKU明细】字段";
           return;
         }
 
@@ -214,8 +214,8 @@
         const recordIds = parseLinkedRecordIds(linkVal);
 
         if (recordIds.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6">当前选择的 PO 采购单未关联任何 SKU 需求明细</td></tr>';
-          statusEl.innerText = "✅ 已读取主单（注：关联明细为空）";
+          tbody.innerHTML = '<tr><td colspan="6">当前选择的 PO 单未关联任何 SKU 需求明细</td></tr>';
+          statusEl.innerText = "✅ 已读取主单（明细为空）";
           return;
         }
 
@@ -282,19 +282,19 @@
         statusEl.innerText = `✅ 合同生成成功！已加载 ${recordIds.length} 项 SKU 明细`;
 
       } catch (err) {
-        statusEl.innerText = "❌ 读取明细失败: " + err.message;
+        statusEl.innerText = "❌ 读取失败: " + err.message;
         console.error(err);
       }
     }
 
     async function init() {
       if (!bitable || !bitable.base) {
-        statusEl.innerText = "❌ 未检测到多维表格环境，请确保在多维表格边栏中打开";
+        statusEl.innerText = "❌ 未检测到多维表格环境";
         return;
       }
 
       try {
-        statusEl.innerText = "🟢 已成功连接边栏！请点击表格中的任意 PO 单记录";
+        statusEl.innerText = "🟢 已成功连接！请在表格中点击任意 PO 单";
 
         const selection = await bitable.base.getSelection();
         if (selection && selection.recordId) {
@@ -308,17 +308,17 @@
           }
         });
       } catch(e) {
-        console.warn("Init notice:", e);
+        console.warn(e);
       }
     }
 
-    // 延时 200ms 确保与多维表格边栏 Handshake 通信完毕
     window.addEventListener('DOMContentLoaded', () => {
       setTimeout(init, 200);
     });
   </script>
 </body>
 </html>
+
 
 
 
